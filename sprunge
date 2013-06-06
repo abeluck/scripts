@@ -11,6 +11,10 @@
 #   $ echo "test" | sprunge
 #   $ cat test.txt | sprunge
 #
+# If you use a transparent Tor proxy, pass the --trans argument
+#
+#   $ cat test.txt | sprunge --trans
+#
 # @author Isis Agora Lovecruft, 0x2cdb8b35
 # @date 25 May 2012
 # @version 0.0.1
@@ -18,4 +22,10 @@
 # Changelog:
 ###############################################################################
 
-curl --socks4a 127.0.0.1:59050 -A 'Mozilla/5.0 (Windows NT 6.1; rv:17.0) Gecko/20100101 Firefox/17.0' -F 'sprunge=<-' http://sprunge.us $1
+PROXY="--socks4a 127.0.0.1:59050"
+if [ $1 == "--trans" ]; then
+    PROXY=
+    shift
+fi
+
+curl $PROXY -A 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:11.0) Gecko/20100201 Firefox/12.0' -F 'sprunge=<-' http://sprunge.us $1
