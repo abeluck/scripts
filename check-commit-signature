@@ -8,6 +8,8 @@
 #
 # To enable this hook, rename this file to "update".
 #
+# Requires git >= 2.10.0
+#
 # Config
 # ------
 # hooks.allowunsignedcommits
@@ -46,7 +48,8 @@
 #
 # @author Isis Agora Lovecruft, 0x2cdb8b35
 # @date 10 March 2013
-# @version 0.0.1
+# @updated 11 July 2019
+# @version 0.0.2
 ##############################################################################
 
 ## server config
@@ -93,6 +96,8 @@ git cat-file blob "$rev_old:.gitconfig" | git config --file /dev/stdin --list
 ##         whitelist = "0A6A 58A1 4B59 46AB DE18  E207 A3AD B67A 2CDB 8B35" # Isis
 ##         whitelist = "0C83 9FFC C5A6 5925 D91B  F16C FF52 7312 2C52 C4E4" # Sebastiaan <seb@stiaan.io>
 ##
+## The whitespace in the fingerprint is required.
+##
 ## Or you can add them through the git config command:
 ##
 ## $ git config --file .gitconfig gpgkeys.whitelist --add '0A6A 58A1 4B59 46AB DE18  E207 A3AD B67A 2CDB 8B35' \
@@ -111,41 +116,28 @@ if [[ "$allowunsignedcommits" != true ]] && [[ "${#collaborators[@]}" -eq 0 ]]; 
     allowunsignedcommits=true
 fi
 
-declare -A trusted_keys
-for collab in "${!collaborators[@]}"; do
-    ## As per git version v2.10.0-rc1, git now shows longids by default
-    fpr="${collaborators["$collab"]}"
-    longid=$(echo "$fpr" | awk '{print $7$8$9$10}' )
-    trusted_keys["$collab"]="$longid"
-
-done
-
 is_allowed_signer() {
-    signing_keyid=$1
+    signing_keyid="$1"
 
     if [ -z "$signing_keyid" ]; then
         echo "*** Error: is_allowed_signer(): No key ID supplied" >&2
         return 1
     fi
 
+    ## Grabs the first fingerprint found, which is the primary key fpr
     fpr_signing_keyid=$(gpg --fingerprint "$signing_keyid" | \
-        grep -o -E "([0-9A-F]{4}[[:space:]]{0,2}){10}")
+        grep -o -E -m 1 "([0-9A-F]{4}[[:space:]]{0,2}){10}")
 
     allowed_keyid=1
 
-    for collab in "${!trusted_keys[@]}"; do
-        ## XXX the $keyid is currently only a short key id
-        ## because git doesn't give us a way to ask for a
-        ## long keyid
-        keyid="${trusted_keys["$collab"]}"
-        if [ "$signing_keyid" = "$keyid" ]; then
-            ## check that the fingerprint of the key that
-            ## gave us a good signature matches the
-            ## hardcoded ones:
-            if [ "$fpr_signing_keyid" = "${collaborators["$collab"]}" ]; then
-                allowed_keyid=0
-                break
-            fi
+    for collab in "${!collaborators[@]}"; do
+        keyid="${collaborators["$collab"]}"
+        ## check that the fingerprint of the key that
+        ## gave us a good signature matches the
+        ## hardcoded ones:
+        if [ "$fpr_signing_keyid" = "$keyid" ]; then
+            allowed_keyid=0
+            break
         fi
     done
 
@@ -230,7 +222,7 @@ if [ -z "$span" ]; then
                         grep -o -E "key ID [0-9A-Fa-f]{16}" | \
                         cut -d ' ' -f 3 )
 
-                    if is_allowed_signer $signing_keyid; then
+                    if is_allowed_signer "$signing_keyid"; then
                         echo "*** Good signature on tag $short_ref by signing key $signing_keyid" >&2
                     else
                         echo "*** Rejecting tag $short_ref due to lack of a valid GPG signature" >&2w
@@ -297,13 +289,11 @@ for commit in $span ; do
         echo "$verify_sig" | grep -e '^\[GNUPG:\] TRUST_UNDEFINED' >/dev/null || has_verified_sig=true
     fi
 
-    ## the following extracts the signing keyid (either short or long) from the
+    ## the following extracts the signing keyid (long) from the
     ## signature on $rev_cur:
     signing_keyid=$(git show --no-patch --format=%H --show-signature "$commit" | \
-        grep -oE "^gpg:\s+ using .* key [0-9A-Fa-f]{16}" | \
-        sed -e 's/^.* \([0-9A-Fa-f]\{16\}$\)/\1/' )
-    fpr_signing_keyid=$(gpg --fingerprint "$signing_keyid" 2>/dev/null | \
-        grep -o -E "([0-9A-F]{4}[[:space:]]{0,2}){10}")
+        grep -oE "^gpg:\s+ using .* key [0-9A-Fa-f]{40}" | \
+        sed -e 's/^.* \([0-9A-Fa-f]\{40\}$\)/\1/' )
 
     case "$ref","$commit_type" in
         refs/heads/*,commit)
@@ -325,7 +315,7 @@ for commit in $span ; do
                     exit 1
                 fi
 
-                if is_allowed_signer $signing_keyid; then
+                if is_allowed_signer "$signing_keyid"; then
                     echo "*** Good signature on commit $commit by signing key $signing_keyid" >&2
                 else
                     echo "*** Key $signing_keyid is not allowed to sign commit $commit" >&2
@@ -358,7 +348,7 @@ for commit in $span ; do
             ## merge into non-master branch
             if [ "$allowunsignedcommits" != "true" ]; then
                 if [ -n "$has_good_sig" -a -n "$signing_keyid" ]; then
-                    if is_allowed_signer $signing_keyid; then
+                    if is_allowed_signer "$signing_keyid"; then
                         echo "*** Good signature on merge $commit by signing key $signing_keyid" >&2
                     else
                         echo "*** Key $signing_keyid is not allowed to sign merge $commit" >&2
